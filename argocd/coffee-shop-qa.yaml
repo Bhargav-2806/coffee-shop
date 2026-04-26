@@ -1,6 +1,5 @@
 # ArgoCD Application — QA environment (kind-coffee-qa cluster)
 # Auto-sync: CI pushes a new image tag to values-qa.yaml → ArgoCD detects and deploys automatically
-# NOTE: Update repoURL with your GitHub repo once Phase 2 (GitHub setup) is complete
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -13,7 +12,7 @@ spec:
   project: default
 
   source:
-    repoURL: https://github.com/YOUR_GITHUB_USERNAME/coffee-shop.git
+    repoURL: https://github.com/Bhargav-2806/coffee-shop.git
     targetRevision: main
     path: helm/coffee-shop
     helm:
