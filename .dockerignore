@@ -1,0 +1,56 @@
+# =============================================================================
+#  .dockerignore — Excludes files from the Docker build context
+#  Rule: Never let secrets, build tools, or unnecessary files into an image
+# =============================================================================
+
+# Dependencies — rebuilt fresh inside the container via npm ci
+node_modules
+npm-debug.log*
+yarn-error.log*
+
+# Build output — generated inside builder stage, not needed from host
+dist
+
+# Secrets — must NEVER be baked into a Docker image
+.env
+.env.*
+.env.local
+.env.development
+.env.production
+.env.example
+
+# Version control — full git history leaks repo metadata
+.git
+.gitignore
+.gitattributes
+
+# IDE and OS files — zero value inside a container
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.swp
+
+# Documentation — not needed at runtime
+*.md
+docs/
+
+# Test files — tests run in CI before the image is built
+**/*.test.ts
+**/*.test.tsx
+**/*.test.js
+**/*.spec.ts
+**/*.spec.js
+coverage/
+.nyc_output/
+
+# CI and DevOps config — no runtime role inside the container
+.github/
+helm/
+k8s/
+terraform/
+docker-compose*.yml
+
+# Logs
+*.log
+logs/

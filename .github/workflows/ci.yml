@@ -1,0 +1,404 @@
+name: CI Pipeline — The London Brew
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# Minimal permissions by default — override per job where needed
+permissions:
+  contents: read
+
+jobs:
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 1 + 2 — Build, Unit Tests & Code Coverage
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-test:
+    name: Build · Test · Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --frozen-lockfile
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+
+      - name: Run unit tests with coverage
+        run: npm run test:coverage
+
+      - name: Enforce coverage threshold (≥ 70%)
+        run: |
+          LINES=$(cat coverage/coverage-summary.json | jq '.total.lines.pct')
+          echo "Line coverage: $LINES%"
+          if (( $(echo "$LINES < 70" | bc -l) )); then
+            echo "Coverage $LINES% is below the 70% threshold — failing pipeline"
+            exit 1
+          fi
+
+      # Upload coverage so SonarQube job can consume it
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 1
+
+      - name: Build React app (Vite)
+        run: npm run build
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 3 — SCA: Software Composition Analysis (Snyk)
+  # ─────────────────────────────────────────────────────────────────────────────
+  sca-snyk:
+    name: SCA · Snyk Dependency Scan
+    runs-on: ubuntu-latest
+    needs: build-test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --frozen-lockfile
+
+      - name: Run Snyk scan — fail on HIGH or CRITICAL
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --all-projects
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 4 + 5 — SAST: SonarQube Analysis + Quality Gate
+  # SonarQube Community runs as an ephemeral service container in this job
+  # ─────────────────────────────────────────────────────────────────────────────
+  sast-sonarqube:
+    name: SAST · SonarQube · Quality Gate
+    runs-on: ubuntu-latest
+    needs: sca-snyk
+
+    services:
+      sonarqube:
+        image: sonarqube:11-community
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/api/system/ping || exit 1"
+          --health-interval 20s
+          --health-timeout 10s
+          --health-retries 20
+          --health-start-period 120s
+
+    steps:
+      - name: Checkout code
+        # Full history needed for SonarQube blame and new-code detection
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --frozen-lockfile
+
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+
+      - name: Wait for SonarQube to be ready
+        run: |
+          echo "Waiting for SonarQube to start..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/api/system/status | grep -q '"status":"UP"'; then
+              echo "SonarQube is ready"
+              break
+            fi
+            echo "Attempt $i/30 — retrying in 10s..."
+            sleep 10
+          done
+
+      - name: Configure SonarQube and generate token
+        run: |
+          # Create the project
+          curl -sf -u admin:admin -X POST \
+            "http://localhost:9000/api/projects/create?name=coffee-shop&project=coffee-shop" || true
+
+          # Generate a CI token
+          SQ_TOKEN=$(curl -sf -u admin:admin -X POST \
+            "http://localhost:9000/api/user_tokens/generate?name=ci-token-${{ github.run_id }}" \
+            | jq -r '.token')
+          echo "SQ_TOKEN=$SQ_TOKEN" >> $GITHUB_ENV
+
+      - name: Run SonarQube scan
+        run: |
+          npx sonar-scanner \
+            -Dsonar.projectKey=coffee-shop \
+            -Dsonar.sources=src,server \
+            -Dsonar.tests=src/__tests__,server/__tests__ \
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+            -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/** \
+            -Dsonar.host.url=http://localhost:9000 \
+            -Dsonar.token=$SQ_TOKEN
+
+      - name: Check Quality Gate
+        run: |
+          TASK_URL=$(grep 'ceTaskUrl' .scannerwork/report-task.txt | cut -d= -f2-)
+
+          # Wait for analysis task to complete
+          for i in $(seq 1 12); do
+            STATUS=$(curl -sf -u "$SQ_TOKEN:" "$TASK_URL" | jq -r '.task.status')
+            echo "Analysis status: $STATUS"
+            [ "$STATUS" = "SUCCESS" ] && break
+            [ "$STATUS" = "FAILED" ] && echo "SonarQube analysis task failed" && exit 1
+            sleep 5
+          done
+
+          # Fetch quality gate result
+          ANALYSIS_ID=$(curl -sf -u "$SQ_TOKEN:" "$TASK_URL" | jq -r '.task.analysisId')
+          QG=$(curl -sf -u "$SQ_TOKEN:" \
+            "http://localhost:9000/api/qualitygates/project_status?analysisId=$ANALYSIS_ID" \
+            | jq -r '.projectStatus.status')
+
+          echo "Quality Gate: $QG"
+          [ "$QG" = "OK" ] || (echo "Quality Gate FAILED — blocking pipeline" && exit 1)
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 6 — Build Docker Image (multi-stage)
+  # ─────────────────────────────────────────────────────────────────────────────
+  docker-build:
+    name: Docker · Build Image
+    runs-on: ubuntu-latest
+    needs: sast-sonarqube
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: coffee-shop:${{ github.sha }}
+          # Cache layers between runs to speed up builds
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Export as tar so downstream jobs can load it
+          outputs: type=docker,dest=/tmp/coffee-shop.tar
+
+      - name: Upload image tar
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/coffee-shop.tar
+          retention-days: 1
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 7 — Image Scan: Trivy CVE scan + SBOM generation
+  # ─────────────────────────────────────────────────────────────────────────────
+  image-scan:
+    name: Image Scan · Trivy
+    runs-on: ubuntu-latest
+    needs: docker-build
+    permissions:
+      contents: read
+      security-events: write   # Required to upload SARIF to GitHub Security tab
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/
+
+      - name: Load Docker image
+        run: docker load --input /tmp/coffee-shop.tar
+
+      - name: Scan image — fail on CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: coffee-shop:${{ github.sha }}
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        # Run even if Trivy found issues so results are always visible
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Generate SBOM (CycloneDX format)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: coffee-shop:${{ github.sha }}
+          format: cyclonedx
+          output: sbom.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json
+          retention-days: 30
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 8 — Smoke Test: run container, verify all endpoints respond
+  # ─────────────────────────────────────────────────────────────────────────────
+  smoke-test:
+    name: Smoke Test
+    runs-on: ubuntu-latest
+    needs: image-scan
+
+    steps:
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/
+
+      - name: Load and start container
+        run: |
+          docker load --input /tmp/coffee-shop.tar
+          docker run -d --name smoke -p 8080:8080 coffee-shop:${{ github.sha }}
+          # Wait for the health check to pass before running assertions
+          echo "Waiting for container to be healthy..."
+          for i in $(seq 1 12); do
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' smoke 2>/dev/null || echo "starting")
+            echo "Health: $STATUS"
+            [ "$STATUS" = "healthy" ] && break
+            sleep 5
+          done
+
+      - name: Assert /health returns 200
+        run: |
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health)
+          [ "$CODE" = "200" ] || (echo "Health check failed — HTTP $CODE" && exit 1)
+
+      - name: Assert /api/menu returns 200
+        run: |
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/menu)
+          [ "$CODE" = "200" ] || (echo "Menu API failed — HTTP $CODE" && exit 1)
+
+      - name: Assert /api/location returns 200
+        run: |
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/location)
+          [ "$CODE" = "200" ] || (echo "Location API failed — HTTP $CODE" && exit 1)
+
+      - name: Assert frontend returns 200
+        run: |
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/)
+          [ "$CODE" = "200" ] || (echo "Frontend failed — HTTP $CODE" && exit 1)
+
+      - name: Cleanup smoke test container
+        if: always()
+        run: docker rm -f smoke || true
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 9 — Push to Docker Hub + Sign with Cosign
+  # Only runs on push to main — not on PRs or feature branches
+  # ─────────────────────────────────────────────────────────────────────────────
+  push-sign:
+    name: Push · Sign (Cosign)
+    runs-on: ubuntu-latest
+    needs: smoke-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: read
+      id-token: write    # Required for Cosign keyless signing via GitHub OIDC
+
+    steps:
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/
+
+      - name: Load Docker image
+        run: docker load --input /tmp/coffee-shop.tar
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Tag and push image
+        run: |
+          IMAGE=${{ secrets.DOCKER_HUB_USERNAME }}/coffee-shop
+          docker tag coffee-shop:${{ github.sha }} $IMAGE:${{ github.sha }}
+          docker tag coffee-shop:${{ github.sha }} $IMAGE:latest
+          docker push $IMAGE:${{ github.sha }}
+          docker push $IMAGE:latest
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with Cosign (keyless via GitHub OIDC)
+        run: |
+          cosign sign --yes \
+            ${{ secrets.DOCKER_HUB_USERNAME }}/coffee-shop:${{ github.sha }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 10 — Helm Update: bump image tag in values-qa.yaml → triggers ArgoCD
+  # ArgoCD detects the tag change in Git and auto-deploys to the QA cluster
+  # Only runs on push to main — not on PRs or feature branches
+  # ─────────────────────────────────────────────────────────────────────────────
+  helm-update:
+    name: Helm · Update QA Image Tag
+    runs-on: ubuntu-latest
+    needs: push-sign
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write    # Required to commit and push the tag bump back to repo
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Update values-qa.yaml with new image tag
+        run: |
+          sed -i "s/  tag: .*/  tag: ${{ github.sha }}/" helm/coffee-shop/values-qa.yaml
+          echo "Updated QA image tag to: ${{ github.sha }}"
+          grep "tag:" helm/coffee-shop/values-qa.yaml
+
+      - name: Commit and push tag bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add helm/coffee-shop/values-qa.yaml
+          git commit -m "ci: update QA image tag to ${{ github.sha }} [skip ci]"
+          git push

@@ -1,0 +1,24 @@
+# Ingress — single controlled entry point via nginx ingress controller
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "coffee-shop.name" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "coffee-shop.labels" . | nindent 4 }}
+  annotations:
+    {{- toYaml .Values.ingress.annotations | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "coffee-shop.name" . }}
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}

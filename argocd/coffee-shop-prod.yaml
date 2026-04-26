@@ -1,0 +1,30 @@
+# ArgoCD Application — Production environment (kind-coffee-prod cluster)
+# Manual sync: prod tag is promoted via PR → ArgoCD syncs only after explicit approval in UI/CLI
+# NOTE: Update repoURL with your GitHub repo once Phase 2 (GitHub setup) is complete
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: coffee-shop-prod
+  namespace: argocd
+  labels:
+    app: coffee-shop
+    env: prod
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/YOUR_GITHUB_USERNAME/coffee-shop.git
+    targetRevision: main
+    path: helm/coffee-shop
+    helm:
+      valueFiles:
+        - values-prod.yaml
+
+  destination:
+    server: https://kubernetes.default.svc   # in-cluster (ArgoCD installed on kind-coffee-prod)
+    namespace: coffee-prod
+
+  syncPolicy:
+    # No automated sync — production deployments require explicit approval
+    syncOptions:
+      - CreateNamespace=false   # Namespace is managed by the Helm chart

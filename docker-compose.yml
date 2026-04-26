@@ -1,0 +1,86 @@
+# =============================================================================
+#  docker-compose.yml — Local Development
+#  Usage : docker compose up --build
+#  Scope : Local dev only — production uses Helm + ArgoCD
+# =============================================================================
+
+services:
+
+  coffee-shop:
+
+    # Human-readable container name
+    container_name: coffee-shop-app
+
+    build:
+      # Build context is the project root (filtered by .dockerignore)
+      context: .
+      dockerfile: Dockerfile
+      # Use the production stage only
+      target: production
+
+    # Map host port 8080 to container port 8080
+    ports:
+      - "8080:8080"
+
+    environment:
+      # Production mode — disables stack traces, enables optimisations
+      - NODE_ENV=production
+      - PORT=8080
+
+    # Load local secrets from .env file (gitignored — never commit real secrets)
+    env_file:
+      - path: .env
+        required: false
+
+    # Restart automatically unless manually stopped
+    restart: unless-stopped
+
+    healthcheck:
+      # Verify the app is responding — not just that the container is running
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    security_opt:
+      # Block privilege escalation via setuid binaries inside the container
+      - no-new-privileges:true
+
+    # Mount root filesystem as read-only — attacker cannot drop files
+    read_only: true
+
+    # Writable in-memory temp dir required when read_only is true
+    tmpfs:
+      - /tmp
+
+    deploy:
+      resources:
+        limits:
+          # Cap CPU and memory to prevent DoS / resource exhaustion
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+    logging:
+      driver: "json-file"
+      options:
+        # Rotate logs to prevent disk exhaustion
+        max-size: "10m"
+        max-file: "3"
+
+# =============================================================================
+#  Quick commands
+#  Build & start     : docker compose up --build
+#  Background mode   : docker compose up --build -d
+#  View logs         : docker compose logs -f coffee-shop
+#  Stop & remove     : docker compose down
+#  Health status     : docker inspect --format='{{.State.Health.Status}}' coffee-shop-app
+#
+#  App               : http://localhost:8080
+#  Health endpoint   : http://localhost:8080/health
+#  Menu API          : http://localhost:8080/api/menu
+#  Location API      : http://localhost:8080/api/location
+# =============================================================================

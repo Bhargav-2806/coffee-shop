@@ -1,0 +1,8 @@
+# QA environment overrides — applied to kind-coffee-qa cluster
+# CI pipeline updates image.tag here on every successful push to main
+
+namespace: coffee-qa
+env: qa
+
+image:
+  tag: latest

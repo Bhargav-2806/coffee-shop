@@ -1,0 +1,13 @@
+# Namespace for the QA environment — applied to the kind-coffee-qa cluster
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: coffee-qa
+  labels:
+    app: coffee-shop
+    env: qa
+    # Enforce Pod Security Standards restricted profile at namespace level
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest

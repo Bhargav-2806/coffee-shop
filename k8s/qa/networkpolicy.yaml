@@ -1,0 +1,60 @@
+# =============================================================================
+#  NetworkPolicy — Zero Trust for QA cluster
+#  Default deny all, then allow only what the app needs
+# =============================================================================
+
+# Block all ingress and egress by default
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: coffee-qa
+spec:
+  podSelector: {}       # Applies to all pods in namespace
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+
+# Allow traffic in from nginx ingress controller only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller
+  namespace: coffee-qa
+spec:
+  podSelector:
+    matchLabels:
+      app: coffee-shop
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+
+---
+
+# Allow DNS egress — required for hostname resolution
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: coffee-qa
+spec:
+  podSelector:
+    matchLabels:
+      app: coffee-shop
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

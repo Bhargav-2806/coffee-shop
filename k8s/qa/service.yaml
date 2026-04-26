@@ -1,0 +1,18 @@
+# ClusterIP Service for QA — internal only, exposed externally via Ingress
+apiVersion: v1
+kind: Service
+metadata:
+  name: coffee-shop
+  namespace: coffee-qa
+  labels:
+    app: coffee-shop
+    env: qa
+spec:
+  type: ClusterIP
+  selector:
+    app: coffee-shop
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80           # Service port inside the cluster
+      targetPort: 8080   # Container port

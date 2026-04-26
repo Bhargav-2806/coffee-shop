@@ -1,0 +1,23 @@
+# =============================================================================
+#  kind cluster config — QA Environment
+#  Creates a local Kubernetes cluster called "coffee-qa" inside Docker
+#  Command: kind create cluster --config kind/qa-cluster.yaml
+# =============================================================================
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+
+# Cluster name — kubectl context will be "kind-coffee-qa"
+name: coffee-qa
+
+nodes:
+  # Single control-plane node (acts as worker too for a sample project)
+  - role: control-plane
+    # Map host port 80 to node port 80 so nginx Ingress is reachable at localhost
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 8081        # QA accessible at http://localhost:8081
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 8444
+        protocol: TCP

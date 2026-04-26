@@ -1,0 +1,8 @@
+# Production environment overrides — applied to kind-coffee-prod cluster
+# image.tag is updated manually (or via PR approval) before ArgoCD syncs to prod
+
+namespace: coffee-prod
+env: prod
+
+image:
+  tag: latest

@@ -1,0 +1,101 @@
+# Deployment for QA — applied to kind-coffee-qa cluster
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coffee-shop
+  namespace: coffee-qa
+  labels:
+    app: coffee-shop
+    env: qa
+spec:
+  # 1 replica — sample project, QA does not need HA
+  replicas: 1
+  selector:
+    matchLabels:
+      app: coffee-shop
+  # Zero-downtime rolling update
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+
+  template:
+    metadata:
+      labels:
+        app: coffee-shop
+        env: qa
+    spec:
+
+      # ── Pod-level security ───────────────────────────────────────────────────
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001        # Must match appuser UID in Dockerfile
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault  # Kernel-level syscall filtering
+
+      # Pod does not need to call the Kubernetes API
+      automountServiceAccountToken: false
+
+      containers:
+        - name: coffee-shop
+          # CI pipeline updates this tag on every successful build on main branch
+          image: bhargav2806/coffee-shop:latest
+          imagePullPolicy: Always
+
+          ports:
+            - containerPort: 8080
+
+          # Load config from ConfigMap
+          envFrom:
+            - configMapRef:
+                name: coffee-shop-config
+
+          # ── Container-level security ─────────────────────────────────────────
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true  # Attacker cannot write to container FS
+            capabilities:
+              drop:
+                - ALL                     # Drop all Linux capabilities
+
+          # ── Resource limits ──────────────────────────────────────────────────
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+
+          # ── Liveness Probe — restart container if app crashes ────────────────
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+
+          # ── Readiness Probe — hold traffic until app is ready ────────────────
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+            timeoutSeconds: 3
+
+          volumeMounts:
+            # /tmp must be writable when readOnlyRootFilesystem is true
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        # Ephemeral in-memory volume — wiped when pod is deleted
+        - name: tmp
+          emptyDir: {}

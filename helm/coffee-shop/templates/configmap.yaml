@@ -1,0 +1,11 @@
+# Non-sensitive app configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "coffee-shop.name" . }}-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "coffee-shop.labels" . | nindent 4 }}
+data:
+  NODE_ENV: {{ .Values.app.nodeEnv | quote }}
+  PORT: {{ .Values.app.port | quote }}

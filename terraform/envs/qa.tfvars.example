@@ -1,0 +1,13 @@
+# QA environment values — copy to qa.tfvars and fill in before applying
+# terraform apply -var-file="envs/qa.tfvars"
+
+aws_region         = "us-east-1"
+environment        = "qa"
+cluster_name       = "coffee-shop-qa"
+kubernetes_version = "1.29"
+
+# t3.medium: 2 vCPU, 4 GB RAM — sufficient for a sample project
+node_instance_type = "t3.medium"
+node_desired_size  = 1
+node_min_size      = 1
+node_max_size      = 2
