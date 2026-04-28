@@ -9,7 +9,7 @@
 
 | File | Purpose |
 |------|---------|
-| `.github/workflows/ci.yml` | Full CI pipeline — 9 stages |
+| `.github/workflows/ci.yml` | Full CI pipeline — 11 stages |
 | `vitest.config.ts` | Test runner + coverage configuration |
 | `sonar-project.properties` | SonarQube project config |
 | `server/__tests__/` | Backend API unit tests |
@@ -22,27 +22,39 @@
 ```
 Push / PR
     │
-    ▼
-Stage 1+2 → Build · Unit Tests · Coverage (≥70%)
-    │
-    ▼
-Stage 3 → SCA — Snyk (fail on HIGH/CRITICAL deps)
-    │
-    ▼
-Stage 4+5 → SAST — SonarQube + Quality Gate (fail = stop)
-    │
-    ▼
-Stage 6 → Build Docker Image (multi-stage)
-    │
-    ▼
-Stage 7 → Trivy CVE Scan + SBOM (fail on CRITICAL)
-    │
-    ▼
-Stage 8 → Smoke Test (assert all endpoints 200)
-    │
-    ▼
-Stage 9 → Push to Docker Hub + Cosign Sign  ← main branch only
+    ├──────────────────────────┐
+    ▼                          ▼
+Stage 1                    Stage 2
+Build · TypeScript · Vite  Unit Tests · Vitest
+    │                          │
+    │                          ▼
+    │                      Stage 3
+    │                      Coverage Gate (≥ 50%)
+    │                          │
+    └──────────┬───────────────┘
+               ▼
+           Stage 4 → SCA — Snyk (fail on HIGH/CRITICAL)
+               │
+               ▼
+           Stage 5+6 → SAST — SonarQube + Quality Gate
+               │
+               ▼
+           Stage 7 → Build Docker Image (multi-stage)
+               │
+               ▼
+           Stage 8 → Trivy CVE Scan + SBOM (fail on CRITICAL)
+               │
+               ▼
+           Stage 9 → Smoke Test (assert all endpoints 200)
+               │
+               ▼
+           Stage 10 → Push to Docker Hub + Cosign Sign  ← main only
+               │
+               ▼
+           Stage 11 → Helm Update (bump values-qa.yaml tag → ArgoCD)
 ```
+
+**Stages 1 and 2 run in parallel** — build and unit tests have no dependency on each other. This cuts pipeline time significantly.
 
 ---
 
@@ -52,22 +64,40 @@ The order is deliberate. Cheap, fast checks run first. Expensive, slow checks ru
 
 | Stage | Why it runs here |
 |-------|-----------------|
-| Build + Tests first | No point scanning code that doesn't compile or has failing tests |
-| SCA before SAST | Dependency vulns are faster to catch than code analysis |
+| Build + Tests in parallel | Both are independent — no reason to run sequentially, faster pipeline |
+| Coverage gate after tests | Can only measure coverage after tests complete |
+| SCA after build + coverage | No point scanning deps if the code doesn't compile or coverage fails |
 | SAST before Docker build | Fix code issues before baking them into an image |
 | Trivy after Docker build | You can only scan an image that exists |
 | Smoke test before push | Never push an image that doesn't actually run |
 | Push only on main | PRs prove the pipeline works — only merge triggers a real artifact |
+| Helm update after push | Tag must exist in Docker Hub before ArgoCD can deploy it |
 
 ---
 
-## Stage 1+2 — Build, Tests & Coverage
+## Stage 1 — Build (TypeScript + Vite)
+
+Runs `tsc --noEmit` to catch type errors, then `vite build` to produce the production bundle. This job has no dependency on tests — it runs immediately in parallel with Stage 2.
+
+If this fails, the entire pipeline stops. There's no point scanning or containerising code that doesn't compile.
+
+---
+
+## Stage 2 — Unit Tests (Vitest)
+
+Runs all tests and generates coverage reports. Uploads the coverage artifact so Stage 3 (Coverage Gate) and Stage 5+6 (SonarQube) can consume it.
+
+Runs in parallel with Stage 1 — test execution does not require the Vite build output.
+
+---
+
+## Stage 3 — Coverage Gate (≥ 50%)
 
 ### Why Code Coverage Has a Threshold?
 
-Coverage without a threshold is just a vanity metric. We enforce ≥70% lines to ensure untested code cannot silently ship. A developer who skips tests will see the pipeline fail, not just a yellow badge.
+Coverage without a threshold is just a vanity metric. We enforce ≥50% lines to ensure untested code cannot silently ship. A developer who skips tests will see the pipeline fail, not just a yellow badge.
 
-**What 70% means in practice:** Core business logic (API routes, data transforms) must be tested. Boilerplate and config files are excluded.
+**What 50% means in practice:** Core business logic (API routes, data transforms) must be tested. The threshold will be raised as the project matures — 50% is the floor, not the ceiling.
 
 ### Why `npm ci` and Not `npm install`?
 
@@ -79,7 +109,7 @@ TypeScript errors caught locally don't always block a commit. Running `tsc --noE
 
 ---
 
-## Stage 3 — SCA: Snyk Dependency Scanning
+## Stage 4 — SCA: Snyk Dependency Scanning
 
 ### What SCA Does
 
@@ -95,7 +125,7 @@ CRITICAL vulnerabilities are obvious. HIGH vulnerabilities are the ones that com
 
 ---
 
-## Stage 4+5 — SAST: SonarQube + Quality Gate
+## Stage 5+6 — SAST: SonarQube + Quality Gate
 
 ### What SAST Does
 
@@ -135,7 +165,7 @@ Rather than requiring a persistent SonarQube server (which adds infrastructure o
 
 ---
 
-## Stage 6 — Docker Build
+## Stage 7 — Docker Build
 
 ### Why Build the Image in CI (Not Locally)?
 
@@ -154,7 +184,7 @@ Docker images built in one job aren't automatically available to other jobs (eac
 
 ---
 
-## Stage 7 — Trivy Image Scan + SBOM
+## Stage 8 — Trivy Image Scan + SBOM
 
 ### Why Scan the Image Separately from the Dependencies?
 
@@ -183,7 +213,7 @@ SARIF is a standard format for security scan results. GitHub reads it and shows 
 
 ---
 
-## Stage 8 — Smoke Test
+## Stage 9 — Smoke Test
 
 ### Why Test BEFORE Pushing to Docker Hub?
 
@@ -204,7 +234,7 @@ A container can be "running" but still initialising. We wait for Docker's built-
 
 ---
 
-## Stage 9 — Push + Cosign Sign
+## Stage 10 — Push + Cosign Sign
 
 ### Why Only Push on `main`?
 

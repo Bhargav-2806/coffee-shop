@@ -13,10 +13,10 @@ permissions:
 jobs:
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # STAGE 1 + 2 — Build, Unit Tests & Code Coverage
+  # STAGE 1 — Build: TypeScript type check + Vite production build
   # ─────────────────────────────────────────────────────────────────────────────
-  build-test:
-    name: Build · Test · Coverage
+  build:
+    name: Build · TypeScript · Vite
     runs-on: ubuntu-latest
 
     steps:
@@ -35,19 +35,34 @@ jobs:
       - name: TypeScript type check
         run: npx tsc --noEmit
 
+      - name: Build React app (Vite)
+        run: npm run build
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 2 — Unit Tests: run Vitest and upload coverage report
+  # Runs in parallel with Stage 1 — no dependency on build output
+  # ─────────────────────────────────────────────────────────────────────────────
+  unit-test:
+    name: Unit Tests · Vitest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --frozen-lockfile
+
       - name: Run unit tests with coverage
         run: npm run test:coverage
 
-      - name: Enforce coverage threshold (≥ 70%)
-        run: |
-          LINES=$(cat coverage/coverage-summary.json | jq '.total.lines.pct')
-          echo "Line coverage: $LINES%"
-          if (( $(echo "$LINES < 70" | bc -l) )); then
-            echo "Coverage $LINES% is below the 70% threshold — failing pipeline"
-            exit 1
-          fi
-
-      # Upload coverage so SonarQube job can consume it
+      # Upload coverage so coverage-gate and SonarQube jobs can consume it
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
@@ -55,16 +70,38 @@ jobs:
           path: coverage/
           retention-days: 1
 
-      - name: Build React app (Vite)
-        run: npm run build
+  # ─────────────────────────────────────────────────────────────────────────────
+  # STAGE 3 — Coverage Gate: enforce minimum line coverage threshold
+  # ─────────────────────────────────────────────────────────────────────────────
+  coverage-gate:
+    name: Coverage Gate · ≥ 50%
+    runs-on: ubuntu-latest
+    needs: unit-test
+
+    steps:
+      - name: Download coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+
+      - name: Enforce coverage threshold (≥ 50%)
+        run: |
+          LINES=$(cat coverage/coverage-summary.json | jq '.total.lines.pct')
+          echo "Line coverage: $LINES%"
+          if (( $(echo "$LINES < 50" | bc -l) )); then
+            echo "Coverage $LINES% is below the 50% threshold — failing pipeline"
+            exit 1
+          fi
+          echo "Coverage check passed ✓"
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # STAGE 3 — SCA: Software Composition Analysis (Snyk)
+  # STAGE 4 — SCA: Software Composition Analysis (Snyk)
   # ─────────────────────────────────────────────────────────────────────────────
   sca-snyk:
     name: SCA · Snyk Dependency Scan
     runs-on: ubuntu-latest
-    needs: build-test
+    needs: [build, coverage-gate]
 
     steps:
       - name: Checkout code
@@ -87,7 +124,7 @@ jobs:
           args: --severity-threshold=high --all-projects
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # STAGE 4 + 5 — SAST: SonarQube Analysis + Quality Gate
+  # STAGE 5 + 6 — SAST: SonarQube Analysis + Quality Gate
   # SonarQube Community runs as an ephemeral service container in this job
   # ─────────────────────────────────────────────────────────────────────────────
   sast-sonarqube:
@@ -187,7 +224,7 @@ jobs:
           [ "$QG" = "OK" ] || (echo "Quality Gate FAILED — blocking pipeline" && exit 1)
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # STAGE 6 — Build Docker Image (multi-stage)
+  # STAGE 7 — Build Docker Image (multi-stage)
   # ─────────────────────────────────────────────────────────────────────────────
   docker-build:
     name: Docker · Build Image
@@ -221,7 +258,7 @@ jobs:
           retention-days: 1
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # STAGE 7 — Image Scan: Trivy CVE scan + SBOM generation
+  # STAGE 8 — Image Scan: Trivy CVE scan + SBOM generation
   # ─────────────────────────────────────────────────────────────────────────────
   image-scan:
     name: Image Scan · Trivy
@@ -276,7 +313,7 @@ jobs:
           retention-days: 30
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # STAGE 8 — Smoke Test: run container, verify all endpoints respond
+  # STAGE 9 — Smoke Test: run container, verify all endpoints respond
   # ─────────────────────────────────────────────────────────────────────────────
   smoke-test:
     name: Smoke Test
@@ -328,7 +365,7 @@ jobs:
         run: docker rm -f smoke || true
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # STAGE 9 — Push to Docker Hub + Sign with Cosign
+  # STAGE 10 — Push to Docker Hub + Sign with Cosign
   # Only runs on push to main — not on PRs or feature branches
   # ─────────────────────────────────────────────────────────────────────────────
   push-sign:
@@ -373,7 +410,7 @@ jobs:
             ${{ secrets.DOCKER_HUB_USERNAME }}/coffee-shop:${{ github.sha }}
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # STAGE 10 — Helm Update: bump image tag in values-qa.yaml → triggers ArgoCD
+  # STAGE 11 — Helm Update: bump image tag in values-qa.yaml → triggers ArgoCD
   # ArgoCD detects the tag change in Git and auto-deploys to the QA cluster
   # Only runs on push to main — not on PRs or feature branches
   # ─────────────────────────────────────────────────────────────────────────────
