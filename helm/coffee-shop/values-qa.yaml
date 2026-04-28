@@ -5,4 +5,4 @@ namespace: coffee-qa
 env: qa
 
 image:
-  tag: latest
+  tag: 1dcc6cc51d780e281d3eeb0d5055aa7997419b49
