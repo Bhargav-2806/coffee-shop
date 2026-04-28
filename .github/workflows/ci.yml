@@ -140,10 +140,13 @@ jobs:
         ports:
           - 9000:9000
         env:
-          # Disable Elasticsearch bootstrap checks — required in CI (low memory/no swap)
           SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
         options: >-
-          --no-healthcheck
+          --health-cmd "wget -q --spider http://localhost:9000/api/system/ping || exit 1"
+          --health-interval 30s
+          --health-timeout 30s
+          --health-retries 6
+          --health-start-period 180s
 
     steps:
       - name: Checkout code
