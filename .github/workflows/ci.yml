@@ -139,12 +139,11 @@ jobs:
         image: sonarqube:lts-community
         ports:
           - 9000:9000
+        env:
+          # Disable Elasticsearch bootstrap checks — required in CI (low memory/no swap)
+          SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
         options: >-
-          --health-cmd "curl -f http://localhost:9000/api/system/ping || exit 1"
-          --health-interval 20s
-          --health-timeout 10s
-          --health-retries 20
-          --health-start-period 120s
+          --no-healthcheck
 
     steps:
       - name: Checkout code
@@ -170,14 +169,18 @@ jobs:
 
       - name: Wait for SonarQube to be ready
         run: |
-          echo "Waiting for SonarQube to start..."
-          for i in $(seq 1 30); do
+          echo "Waiting for SonarQube to start (no-healthcheck — polling manually)..."
+          for i in $(seq 1 40); do
             if curl -sf http://localhost:9000/api/system/status | grep -q '"status":"UP"'; then
-              echo "SonarQube is ready"
+              echo "SonarQube is ready after attempt $i"
               break
             fi
-            echo "Attempt $i/30 — retrying in 10s..."
-            sleep 10
+            if [ $i -eq 40 ]; then
+              echo "SonarQube did not become ready in time"
+              exit 1
+            fi
+            echo "Attempt $i/40 — retrying in 15s..."
+            sleep 15
           done
 
       - name: Configure SonarQube and generate token
