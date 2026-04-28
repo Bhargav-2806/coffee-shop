@@ -125,16 +125,18 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────────────
   # STAGE 5 + 6 — SAST: SonarQube Analysis + Quality Gate
-  # SonarQube Community runs as an ephemeral service container in this job
+  # NOTE: These two stages share one job intentionally — the SonarQube server
+  # runs as an ephemeral service container that dies when the job ends.
+  # Splitting into two jobs would kill the server before the gate can query it.
   # ─────────────────────────────────────────────────────────────────────────────
   sast-sonarqube:
-    name: SAST · SonarQube · Quality Gate
+    name: SAST · SonarQube Analysis + Quality Gate
     runs-on: ubuntu-latest
     needs: sca-snyk
 
     services:
       sonarqube:
-        image: sonarqube:11-community
+        image: sonarqube:lts-community
         ports:
           - 9000:9000
         options: >-
