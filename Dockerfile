@@ -28,8 +28,9 @@ RUN npm run build
 # Fresh minimal image — build tools and devDependencies never ship
 FROM node:20-alpine AS production
 
-# Upgrade all Alpine packages to patch known CVEs before anything else runs
-RUN apk upgrade --no-cache
+# Upgrade Alpine OS packages + npm itself to patch known CVEs
+# npm bundles tar, cross-spawn, glob, minimatch — upgrading npm patches those too
+RUN apk upgrade --no-cache && npm install -g npm@latest
 
 # Create a non-root system user and group to run the app
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
