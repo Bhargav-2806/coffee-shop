@@ -2,7 +2,6 @@ import express from 'express';
 import path from 'path';
 import cors from 'cors';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import menuRouter from './routes/menu.js';
 import locationRouter from './routes/location.js';
 
@@ -34,7 +33,9 @@ export async function createApp() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   } else if (process.env.NODE_ENV !== 'test') {
-    // Use Vite dev middleware in development (not in test mode)
+    // Dynamic import — vite is a devDependency, not present in production image.
+    // Using import() here means Node only resolves it when this branch actually runs.
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
