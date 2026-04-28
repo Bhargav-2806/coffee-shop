@@ -5,4 +5,4 @@ namespace: coffee-qa
 env: qa
 
 image:
-  tag: 1dcc6cc51d780e281d3eeb0d5055aa7997419b49
+  tag: 4e46f3eca48bc16c4462ea20a2785d5c10f6ba3e
