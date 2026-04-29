@@ -15,15 +15,15 @@ terraform {
     }
   }
 
-  # Remote state backend — create the S3 bucket + DynamoDB table manually first,
-  # then uncomment this block before running terraform init
-  # backend "s3" {
-  #   bucket         = "coffee-shop-terraform-state"
-  #   key            = "eks/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   dynamodb_table = "coffee-shop-terraform-locks"
-  #   encrypt        = true
-  # }
+  # Remote state backend — S3 stores the state file, DynamoDB prevents concurrent applies
+  # Bucket + table created via bootstrap commands before running terraform init
+  backend "s3" {
+    bucket         = "coffee-shop-tfstate-bhargav"
+    key            = "eks/qa/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "coffee-shop-tf-locks"
+    encrypt        = true
+  }
 }
 
 provider "aws" {

@@ -1,8 +1,16 @@
-# QA environment overrides — applied to kind-coffee-qa cluster
-# CI pipeline updates image.tag here on every successful push to main
+# QA environment overrides
+# Used by: kind-coffee-qa (local) and coffee-shop-qa EKS cluster
+# CI pipeline auto-updates image.tag on every successful push to main
 
 namespace: coffee-qa
 env: qa
 
 image:
   tag: 4e46f3eca48bc16c4462ea20a2785d5c10f6ba3e
+
+# On EKS: LoadBalancer provisions an AWS Classic ELB with a public DNS name
+# On kind: switch back to ClusterIP + nginx ingress (localhost:8081)
+service:
+  type: LoadBalancer
+  port: 80
+  targetPort: 8080

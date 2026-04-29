@@ -6,7 +6,7 @@ module "eks" {
   version = "~> 20.0"
 
   cluster_name    = var.cluster_name
-  cluster_version = var.kubernetes_version
+  cluster_version = var.kubernetes_version  # 1.31 in qa.tfvars — current EKS stable
 
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets   # Nodes run in private subnets only
