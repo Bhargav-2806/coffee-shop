@@ -6,7 +6,7 @@ namespace: coffee-qa
 env: qa
 
 image:
-  tag: 4e46f3eca48bc16c4462ea20a2785d5c10f6ba3e
+  tag: 7dcf499b528913710c2ce144d4904f58aca56b67
 
 # On EKS: LoadBalancer provisions an AWS Classic ELB with a public DNS name
 # On kind: switch back to ClusterIP + nginx ingress (localhost:8081)
