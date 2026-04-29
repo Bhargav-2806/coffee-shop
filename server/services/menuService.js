@@ -14,23 +14,26 @@ const coffeeItems = [
   { id: 5, name: "Batch Brew", 
     description: "Fast, fresh, and reliable. Rotating daily beans.", 
     price: 3.00 },
-  { id: 6, name: "Oat Cortado", 
-    description: "Silky oat milk meets a ristretto double. Dairy-free.", 
-    price: 4.20 }
+  { id: 6, name: "Oat Cortado",
+    description: "Silky oat milk meets a ristretto double. Dairy-free.",
+    price: 4.20 },
+  { id: 7, name: "Berlin Black",
+    description: "Triple ristretto over ice. Dark, bold, no apologies. Inspired by Berlin.",
+    price: 4.80 }
 ];
 
 const pastryItems = [
-  { id: 7, name: "Butter Croissant", 
-    description: "Flaky, laminated, baked fresh every morning.", 
+  { id: 8, name: "Butter Croissant",
+    description: "Flaky, laminated, baked fresh every morning.",
     price: 2.80 },
-  { id: 8, name: "Pain au Chocolat", 
-    description: "Dark Valrhona chocolate inside buttery pastry layers.", 
+  { id: 9, name: "Pain au Chocolat",
+    description: "Dark Valrhona chocolate inside buttery pastry layers.",
     price: 3.20 },
-  { id: 9, name: "Almond Tart", 
-    description: "Frangipane cream with toasted almond flakes.", 
+  { id: 10, name: "Almond Tart",
+    description: "Frangipane cream with toasted almond flakes.",
     price: 3.50 },
-  { id: 10, name: "Banana Bread", 
-    description: "Spelt flour, walnuts, dark chocolate chip.", 
+  { id: 11, name: "Banana Bread",
+    description: "Spelt flour, walnuts, dark chocolate chip.",
     price: 2.50 }
 ];
 
